@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能图书馆管理系统</title>
+    <link href="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/5.1.3/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container py-5">
+        <h1 class="mb-4 text-center">智能图书馆管理系统</h1>
+        
+        <!-- 文件上传模块 -->
+        <div class="card shadow mb-4">
+            <div class="card-body">
+                <h5 class="card-title"><i class="bi bi-upload"></i> 文件上传</h5>
+                <div class="input-group">
+                    <input type="file" id="fileInput" class="form-control" accept=".txt">
+                    <button class="btn btn-primary" id="uploadBtn">上传文件</button>
+                </div>
+                <div class="progress mt-3" style="height: 25px; display: none;" id="progressBar">
+                    <div class="progress-bar progress-bar-striped bg-success" 
+                         role="progressbar" style="width: 0%">0%</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 检索模块 -->
+        <div class="card shadow mb-4">
+            <div class="card-body">
+                <h5 class="card-title"><i class="bi bi-search"></i> 图书检索</h5>
+                <div class="input-group">
+                    <input type="text" id="searchInput" class="form-control" 
+                           placeholder="输入书名、作者或分类标签">
+                    <button class="btn btn-outline-secondary" id="searchBtn">搜索</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 图书展示 -->
+        <div class="card shadow">
+            <div class="card-body">
+                <h5 class="card-title"><i class="bi bi-book"></i> 馆藏目录</h5>
+                <table class="table table-hover" id="bookTable">
+                    <thead>
+                        <tr>
+                            <th>书名</th>
+                            <th>分类标签</th>
+                            <th>中图法编号</th>
+                            <th>文件大小</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bookList"></tbody>
+                </table>
+                <button class="btn btn-success float-end" id="exportBtn">导出ZIP</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 依赖脚本 -->
+    <script src="https://cdn.bootcdn.net/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script src="https://cdn.bootcdn.net/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
+    <script>
+        // 配置参数
+        const CONFIG = {
+            API_KEY: 'dsk-xxxxxxxxxxxxxxxxxxxx', // 替换为实际API密钥
+            MAX_FILE_SIZE: 5 * 1024 * 1024, // 5MB
+            SUPPORTED_ENCODINGS: ['gbk', 'utf-8']
+        };
+
+        // 编码检测器
+        function detectEncoding(buffer) {
+            const bytes = new Uint8Array(buffer);
+            if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+                return 'utf-8';
+            }
+            try {
+                new TextDecoder('gbk').decode(bytes.slice(0, 1000));
+                return 'gbk';
+            } catch {
+                return 'utf-8';
+            }
+        }
+
+        // 文件上传处理器
+        async function handleFileUpload(file) {
+            try {
+                // 显示进度条
+                $('#progressBar').show().find('.progress-bar')
+                    .css('width', '10%').text('读取文件中...');
+
+                // 读取文件内容
+                const buffer = await file.arrayBuffer();
+                const encoding = detectEncoding(buffer);
+                const decoder = new TextDecoder(encoding);
+                const content = decoder.decode(buffer);
+
+                // 更新进度
+                updateProgress(30, 'AI智能分类中...');
+
+                // 调用分类API
+                const classification = await classifyContent(content);
+                
+                // 保存文件
+                updateProgress(70, '保存文件中...');
+                await saveFile(file.name, content, classification);
+
+                // 完成处理
+                updateProgress(100, '上传完成！');
+                setTimeout(() => $('#progressBar').hide(), 1000);
+                refreshBookList();
+
+            } catch (error) {
+                console.error('上传失败:', error);
+                $('#progressBar').hide();
+                alert(`上传失败: ${error.message}`);
+            }
+        }
+
+        // 分类函数
+        async function classifyContent(text) {
+            const response = await fetch('https://api.deepseek.com/v1/classify', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${CONFIG.API_KEY}`
+                },
+                body: JSON.stringify({
+                    text: text.slice(0, 5000),
+                    categories: ['恋爱', '悬疑', '科幻', '历史', '奇幻', '恐怖', '励志', '教育']
+                })
+            });
+
+            if (!response.ok) throw new Error('分类服务不可用');
+            const data = await response.json();
+            
+            return {
+                tag: data.top_category || '其他',
+                clc: mapCLC(data.top_category)
+            };
+        }
+
+        // 中图法映射
+        function mapCLC(tag) {
+            const mapping = {
+                '恋爱': 'I247.5',
+                '悬疑': 'I247.56',
+                '科幻': 'I247.55',
+                '历史': 'K20',
+                '奇幻': 'I247.59',
+                '恐怖': 'I247.57',
+                '励志': 'B821',
+                '教育': 'G40'
+            };
+            return mapping[tag] || 'Z';
+        }
+
+        // DOM绑定
+        $('#uploadBtn').click(() => $('#fileInput').click());
+        $('#fileInput').change(async function() {
+            const file = this.files[0];
+            if (file) await handleFileUpload(file);
+        });
+    </script>
+</body>
+</html>
